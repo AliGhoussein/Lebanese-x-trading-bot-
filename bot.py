@@ -1,138 +1,99 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# 🔹 ضع توكن البوت الخاص بك من BotFather هون
-TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
-
-# 🔹 ضع رقم الـ Chat ID الخاص بك لتستقبل الطلبات
+TOKEN = "توكن_البوت_هون"
 ADMIN_CHAT_ID = 1530145001
 
-# الخطوات بالتسلسل الجديد
+# خطوات الأسئلة
 STEPS = [
-    {"key": "full_name", "prompt": "📝 اكتب اسمك الثلاثي:", "type": "text"},
-    {"key": "email", "prompt": "📧 اكتب بريدك الالكتروني:", "type": "text"},
-    {"key": "phone", "prompt": "📱 اكتب رقم هاتفك مع رمز بلدك:", "type": "text"},
-    {"key": "telegram_user", "prompt": "💬 اكتب المعرّف الخاص بك على تلغرام (username):", "type": "text"},
-    {"key": "info1", "prompt": "🔗 للانضمام للقناة الخاصة، افتح حسابك تحت وكالتنا عبر الرابط التالي:\nhttps://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490", "type": "info"},
-    {"key": "account_number", "prompt": "💳 اكتب رقم حسابك الذي أنشأته لدى شركة Oxshare:", "type": "text"},
-    {"key": "deposit_proof", "prompt": "📸 أرفق صورة لرسالة البريد الإلكتروني التي تم إرسالها إليك من قبل الشركة بنجاح الإيداع في حسابك:", "type": "photo"},
-    {"key": "done", "prompt": "🎉 أهلاً وسهلاً بك في عائلة Lebanese X Trading!\nيرجى الانتظار للتدقيق لإضافتك للقناة الخاصة.\n📞 يمكنك التواصل معنا على واتساب: +96171204714", "type": "info"}
+    {"key": "full_name", "prompt": "📝 اكتب اسمك الثلاثي"},
+    {"key": "email", "prompt": "📧 اكتب بريدك الإلكتروني"},
+    {"key": "phone", "prompt": "📱 اكتب رقم هاتفك مع رمز بلدك"},
+    {"key": "username", "prompt": "👤 اكتب المعرّف الخاص بك على تلغرام (username)"},
+    {"key": "info", "prompt": "🔗 للانضمام للقناة الخاصة افتح حسابك تحت وكالتنا عن طريق الرابط التالي:\nhttps://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490"},
+    {"key": "account_number", "prompt": "💳 اكتب رقم حسابك الذي أنشأته لدى شركة Oxshare"},
+    {"key": "deposit_proof", "prompt": "📸 أرفق صورة لرسالة البريد الإلكتروني التي تم إرسالها إليك من قبل الشركة بنجاح الإيداع في حسابك", "type": "photo"},
+    {"key": "done", "prompt": "🎉 أهلاً وسهلاً بك في عائلة Lebanese X Trading.\nيرجى الانتظار للتدقيق لإضافتك للقناة الخاصة.\nيمكنك التواصل معنا على واتساب: +96171204714", "type": "info"}
 ]
 
-# 🔹 ذاكرة لحفظ إجابات المستخدمين
+# لتخزين بيانات المستخدم
 user_flows = {}
 
-# إرسال أول سؤال
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
     user_flows[user_id] = {"step": 0, "answers": {}}
-    await update.message.reply_text("أهلاً وسهلاً 👋! لنبدأ التسجيل...")
-    await ask_next_question(update, context)
+    await update.message.reply_text("👋 أهلاً فيك! خلينا نبدأ.")
+    await ask_next(update, context)
 
-# وظيفة لطرح السؤال التالي
-async def ask_next_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
     flow = user_flows.get(user_id)
-
     if not flow:
-        return await update.message.reply_text("حدث خطأ، أرسل /start لإعادة المحاولة.")
-
-    if flow["step"] >= len(STEPS):
-        await update.message.reply_text("✅ تم استلام جميع البيانات. شكراً!")
+        await update.message.reply_text("❗ اكتب /start للبدء من جديد.")
         return
 
-    step = STEPS[flow["step"]]
-    if step["type"] == "info":
+    i = flow["step"]
+    if i >= len(STEPS):
+        await update.message.reply_text("✅ شكراً! تم إرسال بياناتك للمراجعة.")
+        return
+
+    step = STEPS[i]
+    if step.get("type") == "info":
         await update.message.reply_text(step["prompt"])
         flow["step"] += 1
-        await ask_next_question(update, context)
-    else:
-        await update.message.reply_text(step["prompt"])
+        await ask_next(update, context)
+        return
 
-# التعامل مع النصوص
+    await update.message.reply_text(step["prompt"])
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
-    if user_id not in user_flows:
-        return await update.message.reply_text("اكتب /start لتبدأ.")
+    flow = user_flows.get(user_id)
+    if not flow:
+        return await update.message.reply_text("❗ اكتب /start للبدء من جديد.")
 
-    flow = user_flows[user_id]
     step = STEPS[flow["step"]]
     flow["answers"][step["key"]] = update.message.text
     flow["step"] += 1
+    await ask_next(update, context)
 
-    # بعد آخر إدخال، إرسال النتائج للإدارة
-    if flow["step"] >= len(STEPS):
-        await send_to_admin(update, context)
-    else:
-        await ask_next_question(update, context)
-
-# التعامل مع الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
-    if user_id not in user_flows:
-        return await update.message.reply_text("اكتب /start لتبدأ.")
-
-    flow = user_flows[user_id]
-    step = STEPS[flow["step"]]
-
-    if step["type"] != "photo":
-        return await update.message.reply_text("📎 الرجاء إرسال النص المطلوب وليس صورة.")
+    flow = user_flows.get(user_id)
+    if not flow:
+        return await update.message.reply_text("❗ اكتب /start للبدء من جديد.")
 
     photo = update.message.photo[-1]
-    flow["answers"][step["key"]] = photo.file_id
+    flow["answers"][STEPS[flow["step"]]["key"]] = photo.file_id
     flow["step"] += 1
 
-    if flow["step"] >= len(STEPS):
-        await send_to_admin(update, context)
-    else:
-        await ask_next_question(update, context)
+    await ask_next(update, context)
 
-# إرسال البيانات للإدارة
-async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_chat.id
-    flow = user_flows[user_id]
-    answers = flow["answers"]
-
-    text = "📩 تم استلام طلب جديد:\n\n"
+    # إرسال البيانات للإدمن
+    lines = ["📋 *بيانات جديدة من مستخدم:*"]
     for s in STEPS:
-        if s["type"] == "info":
-            continue
-        val = answers.get(s["key"], "")
-        if s["type"] == "photo":
-            val = "(📸 صورة مرفقة)"
-        text += f"{s['prompt']}\n➡ {val}\n\n"
+        key = s["key"]
+        if key in flow["answers"] and s.get("type") != "photo":
+            lines.append(f"{s['prompt']}: {flow['answers'][key]}")
 
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+    text_summary = "\n".join(lines)
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text_summary)
 
-    if "deposit_proof" in answers:
-        await context.bot.send_photo(
-            chat_id=ADMIN_CHAT_ID,
-            photo=answers["deposit_proof"],
-            caption="📎 إثبات الإيداع"
-        )
+    if "deposit_proof" in flow["answers"]:
+        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=flow["answers"]["deposit_proof"], caption="📎 إثبات الإيداع")
 
-    await update.message.reply_text("✅ شكراً! تم إرسال بياناتك إلى الإدارة.")
-
-# اختبار للإدارة فقط
 async def pingadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="✅ Test to admin: البوت شغال تمام!")
-    await update.message.reply_text("📨 تم إرسال تنبيه للإدارة.")
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="📬 Test to admin: البوت شغال ✅")
+    await update.message.reply_text("📩 تم إرسال رسالة للإدمن بنجاح!")
 
-# ----------------------------
-# 🔹 MAIN FUNCTION
-# ----------------------------
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("pingadmin", pingadmin))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-print("✅ البوت جاهز ويعمل الآن (Lebanese X Trading)")
-app.run_polling()
+    print("✅ البوت يعمل الآن (Lebanese X Trading)")
+    app.run_polling()
 
 if _name_ == "_main_":
     main()
-
-
