@@ -95,6 +95,7 @@ def main():
     print("✅ البوت يعمل الآن (Lebanese X Trading)")
     app.run_polling()
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
+
 
