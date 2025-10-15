@@ -137,4 +137,7 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_text))
 
 print("✅ البوت شغال (فلو متسلسل)…")
 app.run_polling()
-
+async def pingadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="📣 Test to admin: الإرسال شغّال ✅")
+    await update.message.reply_text("تم إرسال رسالة تجريبية للإدارة.")
+app.add_handler(CommandHandler("pingadmin", pingadmin))
