@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # 🔹 ضع توكن البوت الخاص بك من BotFather هون
-TOKEN = "ضع_توكن_البوت_هون"
+TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 
 # 🔹 ضع رقم الـ Chat ID الخاص بك لتستقبل الطلبات
 ADMIN_CHAT_ID = 1530145001
@@ -134,3 +134,4 @@ def main():
 
 if _ _name_ _ == "_ _main_ _":
     main()
+
