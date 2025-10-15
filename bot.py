@@ -8,7 +8,7 @@ from telegram.ext import (
 TOKEN = os.environ["BOT_TOKEN"]
 
 # غيّرها لرقم الشات تبعك إذا بدك توصلك نسخة من الطلب (اختياري)
-ADMIN_CHAT_ID = 0
+ADMIN_CHAT_ID = 1530145001
 
 # تعريف الخطوات: type = text/email/info/photo
 STEPS = [
@@ -137,3 +137,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_text))
 
 print("✅ البوت شغال (فلو متسلسل)…")
 app.run_polling()
+
