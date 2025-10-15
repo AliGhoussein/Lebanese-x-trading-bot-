@@ -7,7 +7,7 @@ from telegram.ext import (
 
 TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 # غيّرها لرقم الشات تبعك إذا بدك توصلك نسخة من الطلب (اختياري)
-ADMIN_CHAT_ID = 1530145001
+ADMIN_CHAT_ID = 
 
 # تعريف الخطوات: type = text/email/info/photo
 STEPS = [
@@ -140,5 +140,6 @@ async def pingadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="📣 Test to admin: الإرسال شغّال ✅")
     await update.message.reply_text("تم إرسال رسالة تجريبية للإدارة.")
 app.add_handler(CommandHandler("pingadmin", pingadmin))
+
 
 
