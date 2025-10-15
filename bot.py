@@ -10,8 +10,8 @@ from telegram.ext import (
 from datetime import datetime
 
 # إعدادات البوت
-TOKEN = "BOT_TOKEN_HERE"  # ⚠ استبدلها بتوكن البوت من BotFather
-ADMIN_CHAT_ID = 1530145001  # رقمك على تيليجرام (انت)
+TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
+ADMIN_CHAT_ID = 1530145001
 
 # إعداد نظام التسجيل
 logging.basicConfig(
@@ -168,3 +168,4 @@ def main():
 
 if _name_ == "_main_":
     main()
+
