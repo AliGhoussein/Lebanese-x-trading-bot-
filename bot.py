@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = "توكن_البوت_هون"
+TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 ADMIN_CHAT_ID = 1530145001
 
 # خطوات الأسئلة
@@ -97,3 +97,4 @@ def main():
 
 if _name_ == "_main_":
     main()
+
