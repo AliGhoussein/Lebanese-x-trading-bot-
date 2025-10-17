@@ -1,361 +1,350 @@
-# bot.py — Lebanese X Trading (Stable + Retry + Relaxed Validation)
-# Requirements: python-telegram-bot==20.x
-# Usage: paste as-is, then Commit & Deploy. (You can replace TOKEN/ADMIN_CHAT_ID if تريد)
-
+# bot.py
 import re
-import asyncio
 import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Optional
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
+    ContextTypes,
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes,
 )
 
-# ------------------ CONFIG ------------------
-# إذا حابب تستخدم environment variables بدل الثوابت، بدّل هنا.
-TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
+# ---------------------------
+# CONFIGURATION (You provided)
+# ---------------------------
 ADMIN_CHAT_ID = 1530145001
-WHATSAPP_URL = "https://wa.me/96171204714"
-# عدد محاولات الإرسال للإدمن لو فشل أول مرة
-ADMIN_SEND_RETRIES = 3
-# -------------------------------------------
+TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
+WHATSAPP_NUMBER = "+96171204714"  # button link will use wa.me
+OXSHARE_LINK = "https://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490"
+# ---------------------------
 
-# Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# logger basic config (no admin startup notifications)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 logger = logging.getLogger(__name__)
 
-# Steps (one-by-one)
-STEPS = [
-    {"key": "full_name", "prompt": "1) 👤 الرجاء إدخال اسمك الثلاثي كما في بطاقتك الرسمية:", "type": "text"},
-    {"key": "email", "prompt": "2) 📧 الرجاء إدخال بريدك الإلكتروني الصحيح (مثال: name@example.com):", "type": "email"},
-    {"key": "phone", "prompt": "3) 📱 الرجاء كتابة رقم هاتفك مع رمز البلد (مثال: +96171234567 أو 96171234567):", "type": "phone"},
-    {"key": "username", "prompt": "4) 💬 اكتب معرفك على Telegram (username) — مع أو بدون @:", "type": "username"},
-    {
-        "key": "info",
-        "prompt": (
-            "5) 🔗 للانضمام للقناة الخاصة افتح حسابك عبر:\n"
-            "https://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490\n\n"
-            "إذا عندك حساب مسبقاً مع وكيلنا، اكتب *رقم الحساب واسم الوكيل* في الرد التالي (يمكنك كتابتهم في سطر واحد أو سطرين)."
-        ),
-        "type": "info",
-    },
-    {"key": "account_combo", "prompt": "6) 🏦 اكتب رقم حسابك لدى Oxshare (ويمكن إضافة اسم الوكيل بعد الرقم أو في سطر جديد):", "type": "account"},
-    {"key": "deposit_proof", "prompt": "7) 📸 أرسل صورة لرسالة تأكيد الإيداع (يجب أن تكون صورة — لا نقبل نصاً هنا).", "type": "photo"},
-    {"key": "done", "prompt": "8) 🎉 شكراً! سترى زر التواصل مع فريقنا في الرسالة التالية.", "type": "info"},
-]
-
-# In-memory flows: chat_id -> {"step": int, "answers": {...}}
+# In-memory storage for flows. We will NOT auto-delete data (per request).
 FLOWS: Dict[int, Dict[str, Any]] = {}
 
+# Steps definition: key, type, prompt
+STEPS = [
+    {"key": "full_name", "type": "text", "prompt": "1️⃣ الرجاء كتابة اسمك الثلاثي:"},
+    {"key": "email", "type": "email", "prompt": "2️⃣ من فضلك اكتب بريدك الإلكتروني (مثال: example@gmail.com):"},
+    {"key": "phone", "type": "phone", "prompt": "3️⃣ اكتب رقم هاتفك مع رمز بلدك (مثال: +96171... أو 96171...):"},
+    {"key": "username", "type": "username", "prompt": "4️⃣ اكتب المعرف الخاص بك على تلغرام (username):"},
+    {"key": "oxshare_instruction", "type": "info", "prompt": (
+        "5️⃣ للانضمام للقناة الخاصة افتح حسابك تحت وكالتنا عبر الرابط:\n"
+        f"{OXSHARE_LINK}\n\n"
+        "إذا لديك حساب فعلاً لدينا أو عند أحد وكلائنا، اكتب فقط رقم حسابك واسم وكيلك."
+    )},
+    {"key": "oxshare_account", "type": "text", "prompt": "6️⃣ اكتب رقم حسابك الذي أنشأته لدى شركة Oxshare (وأضف اسم الوكيل إن وُجد):"},
+    {"key": "deposit_proof", "type": "photo", "prompt": "7️⃣ أرفق صورة رسالة البريد الإلكتروني التي تثبت نجاح الإيداع (أرسل صورة، لا تكتب نصًا):"},
+    {"key": "done_msg", "type": "final", "prompt": (
+        "8️⃣ شكراً! ستصلك رسالة تثبيت وإن شاء الله بنضيفك للقناة قريباً.\n"
+        f"للتواصل الفوري عبر واتساب: {WHATSAPP_NUMBER}"
+    )},
+]
 
-# ------------------ Validators & Helpers ------------------
-
-def merge_multiline(text: str) -> str:
-    if "\n" in text:
-        parts = [p.strip() for p in text.split("\n") if p.strip()]
-        return " ".join(parts)
-    return text.strip()
-
-
-def normalize_phone(s: str) -> str:
-    s = s.strip()
-    s = re.sub(r"[^\d+]", "", s)  # remove spaces and non-digit except '+'
-    if s.startswith("00"):
-        s = "+" + s[2:]
-    if not s.startswith("+"):
-        # assume missing plus — add plus
-        s = "+" + s
-    return s
-
-
-def valid_email(s: str) -> bool:
-    s = s.strip()
-    # permissive regex — practical for most emails
-    return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", s))
+# Validators
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_RE = re.compile(r"^\+?\d{6,15}$")  # basic check
 
 
-def valid_phone(s: str) -> bool:
-    s = s.strip()
-    s_norm = re.sub(r"[^\d]", "", s)
-    return 7 <= len(s_norm) <= 15
+def get_step_index(user_flow: Dict[str, Any]) -> int:
+    return user_flow.get("step", 0)
 
 
-def valid_fullname(s: str) -> bool:
-    parts = [p for p in s.strip().split() if p]
-    return len(parts) >= 2 and any(re.search(r"[A-Za-z\u0600-\u06FF]", p) for p in parts)
+def set_next_step(user_flow: Dict[str, Any]) -> None:
+    user_flow["step"] = get_step_index(user_flow) + 1
 
 
-def valid_username(s: str) -> bool:
-    s = s.strip()
-    if s.startswith("@"):
-        s = s[1:]
-    return bool(re.fullmatch(r"[A-Za-z0-9_]{2,32}", s))
+def format_admin_message(flow: Dict[str, Any]) -> str:
+    lines = []
+    # Order by STEPS sequence but include only answers keys
+    for s in STEPS:
+        k = s["key"]
+        if k in ("oxshare_instruction", "done_msg"):
+            continue
+        val = flow.get("answers", {}).get(k)
+        label = {
+            "full_name": "👤 الاسم",
+            "email": "📧 البريد",
+            "phone": "📱 الهاتف",
+            "username": "💬 يوزر تلغرام",
+            "oxshare_account": "🏦 رقم حساب (Oxshare)",
+            "deposit_proof": "🧾 إثبات الإيداع (photo)",
+        }.get(k, k)
+        # For photo, we will send the file separately; show placeholder text
+        if val is None:
+            display = "—"
+        else:
+            display = str(val)
+        lines.append(f"{label}: {display}")
+    return "📩 طلب تسجيل جديد\n\n" + "\n".join(lines)
 
 
-def parse_account_combo(text: str) -> Tuple[str, str]:
-    """
-    Extract account number (first 4+ digits) and agent name (rest).
-    Accepts single or multiline.
-    """
-    text = merge_multiline(text)
-    m = re.search(r"(\d{4,})", text)
-    acc = m.group(1) if m else ""
-    agent = ""
-    if acc:
-        after = text.split(acc, 1)[1].strip()
-        after = re.sub(r"^(?:[-:,\.]|\s)(?:الوكيل|اسم الوكيل|وكيل|و)?\s", "", after, flags=re.IGNORECASE)
-        agent = after.strip()
-    return acc, agent
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    uid = user.id
+    # Initialize flow if not exist
+    if uid not in FLOWS:
+        FLOWS[uid] = {"answers": {}, "step": 0}
+    flow = FLOWS[uid]
 
-
-def validate_answer(answer: str, step_type: str, key: str = "") -> bool:
-    ans = answer.strip()
-    if step_type == "text" and key == "full_name":
-        return valid_fullname(ans)
-    if step_type == "email":
-        return valid_email(ans)
-    if step_type == "phone":
-        return valid_phone(ans)
-    if step_type == "username":
-        return valid_username(ans)
-    if step_type == "account":
-        acc, _ = parse_account_combo(ans)
-        return bool(acc)
-    if step_type == "photo":
-        return True
-    return len(ans) > 0
-
-
-# ------------------ Bot Handlers ------------------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    FLOWS[chat_id] = {"step": 0, "answers": {}}
-    welcome = (
+    # Welcome message (as requested)
+    welcome_text = (
         "مرحباً 👋\n\n"
         "أنا روبوت خدمة العملاء في فريق Lebanese X Trading.\n"
-        "الرجاء الإجابة على كامل الأسئلة بدقة لضمان خدمتك بشكل أسرع.\n\n"
-        "سنبدأ الآن 👇"
+        "الرجاء الإجابة على كامل الأسئلة بالشكل الصحيح لضمان خدمتكم بشكل أسرع و أفضل.\n\n"
+        "نبدأ الآن:"
     )
-    await update.message.reply_text(welcome, parse_mode="Markdown")
-
-    # small admin connectivity test (non-blocking)
-    try:
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔔 [نوت] بوت Lebanese X Trading: تم تشغيل جلسة جديدة.")
-    except Exception as e:
-        # print to logs — لا نوقف المستخدم
-        logger.warning("Admin test message failed: %s", e)
-
-    # send first question
-    await ask_next(update, context)
+    await update.message.reply_markdown(welcome_text)
+    # Ask first prompt
+    await ask_current_question(update, context)
 
 
-async def ask_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    flow = FLOWS.get(chat_id)
-    if not flow:
-        await update.message.reply_text("حدث خطأ — الرجاء كتابة /start للبدء.")
+async def ask_current_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    flow = FLOWS.get(uid)
+    if flow is None:
+        FLOWS[uid] = {"answers": {}, "step": 0}
+        flow = FLOWS[uid]
+    idx = get_step_index(flow)
+    # skip info steps if needed (but we present them as normal)
+    if idx >= len(STEPS):
+        # All done
+        await finalize_flow_for_user(update, context, uid)
         return
-    i = flow["step"]
-    if i >= len(STEPS):
-        return
-    step = STEPS[i]
-    if step["type"] == "info":
-        await update.message.reply_text(step["prompt"], parse_mode="Markdown")
-        flow["step"] += 1
-        # immediately advance to next (info is just informational)
-        await ask_next(update, context)
-        return
-    await update.message.reply_text(step["prompt"], parse_mode="Markdown")
+    step = STEPS[idx]
+    # If asking for photo, prompt user to send photo
+    await update.message.reply_text(step["prompt"])
 
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id not in FLOWS:
-        await update.message.reply_text("اضغط /start للبدء.")
-        return
+def normalize_username(val: str) -> str:
+    val = val.strip()
+    if not val.startswith("@"):
+        val = "@" + val
+    return val
 
-    flow = FLOWS[chat_id]
-    i = flow["step"]
-    if i >= len(STEPS):
-        await update.message.reply_text("انتهت الخطوات، ارسل /start لبدء جديد.")
-        return
 
-    step = STEPS[i]
-    key = step["key"]
-    step_type = step["type"]
-
-    if step_type == "photo":
-        await update.message.reply_text("📎 هذه الخطوة تحتاج صورة — الرجاء إرسال الصورة بدل النص.")
-        return
-
-    raw = update.message.text or ""
-    answer = merge_multiline(raw)
-
-    # special normalize for phone and username
+def validate_answer(step_type: str, text: Optional[str], update: Update) -> (bool, Optional[str]):
+    # returns (is_valid, normalized_value or None)
+    if step_type == "text":
+        if not text or text.strip() == "":
+            return False, None
+        # simple name validation allowed (for account numbers etc this function used elsewhere)
+        return True, text.strip()
+    if step_type == "email":
+        if not text:
+            return False, None
+        t = text.strip()
+        if EMAIL_RE.match(t):
+            return True, t
+        return False, None
     if step_type == "phone":
-        # allow missing plus, we'll normalize if valid
-        if raw.strip().startswith("+"):
-            normalized = normalize_phone(raw)
+        if not text:
+            return False, None
+        t = text.strip()
+        # add + if starts with country code without plus (common)
+        if t.isdigit() and len(t) >= 6:
+            t2 = "+" + t
         else:
-            normalized = normalize_phone(raw)  # add + if missing
-        # validate on digits
-        if not validate_answer(normalized, step_type, key):
-            await update.message.reply_text("❌ رقم هاتف غير صالح. مثال صحيح: +96171234567")
-            return
-        answer = normalized
-    elif step_type == "username":
-        # store username with leading @
-        u = raw.strip()
-        if not u.startswith("@"):
-            u = "@" + u
-        if not validate_answer(u, step_type, key):
-            await update.message.reply_text("❌ اسم المستخدم غير صالح. مثال: @AliGhsein")
-            return
-        answer = u
-    else:
-        if not validate_answer(answer, step_type, key):
-            # custom messages for clarity
-            if step_type == "email":
-                await update.message.reply_text("❌ البريد غير صحيح. مثال: name@example.com")
-            elif step_type == "text" and key == "full_name":
-                await update.message.reply_text("❌ اكتب اسمك الثلاثي (اسم ولقب على الأقل).")
-            elif step_type == "account":
-                await update.message.reply_text("❌ رقم الحساب غير واضح. اكتب رقم الحساب (4 أرقام فما فوق) ويمكنك إضافة اسم الوكيل.")
-            else:
-                await update.message.reply_text("❌ الإجابة غير مقبولة — حاول مجدداً.")
-            return
+            t2 = t
+        # basic check
+        if PHONE_RE.match(t2):
+            # normalize to + format
+            if not t2.startswith("+"):
+                t2 = "+" + t2
+            return True, t2
+        return False, None
+    if step_type == "username":
+        if not text:
+            return False, None
+        t = text.strip()
+        t = t.replace(" ", "")
+        # minimal check: should be 5-32 chars roughly
+        if len(t.replace("@", "")) < 2:
+            return False, None
+        return True, normalize_username(t)
+    if step_type == "info":
+        # info step doesn't require user input; we'll accept empty and proceed
+        return True, None
+    if step_type == "final":
+        return True, None
+    return False, None
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    if uid not in FLOWS:
+        # if user didn't start properly, start a flow
+        FLOWS[uid] = {"answers": {}, "step": 0}
+    flow = FLOWS[uid]
+    idx = get_step_index(flow)
+    if idx >= len(STEPS):
+        # already done
+        await update.message.reply_text("شكراً — لمزيد من المساعدة أرسل /start")
+        return
+    step = STEPS[idx]
+    stype = step["type"]
+
+    # If current step expects photo, tell user they must send a photo
+    if stype == "photo":
+        await update.message.reply_text("❌ هذا السؤال يتطلب إرسال صورة. الرجاء إرسال صورة فحسب.")
+        return
+
+    text = update.message.text
+    valid, value = validate_answer(stype, text, update)
+    if not valid:
+        # prepare nice message
+        if stype == "email":
+            await update.message.reply_text("❌ البريد غير صحيح. حاول مرة أخرى بالشكل: example@gmail.com")
+        elif stype == "phone":
+            await update.message.reply_text("❌ رقم الهاتف غير صحيح. أرسل رقمك مع رمز الدولة مثلاً: +96171xxxxxxx")
+        elif stype == "username":
+            await update.message.reply_text("❌ اسم المستخدم غير صالح. اكتب اليوزر بدون مسافات، مثال: @AliGhsein")
+        else:
+            await update.message.reply_text("❌ الإجابة غير صحيحة أو فارغة، حاول مجدداً.")
+        return
 
     # store answer
-    if step_type == "account":
-        acc, agent = parse_account_combo(answer)
-        flow["answers"]["account_number"] = acc
-        if agent:
-            flow["answers"]["agent_name"] = agent
+    if "answers" not in flow:
+        flow["answers"] = {}
+    if value is not None:
+        flow["answers"][step["key"]] = value
     else:
-        flow["answers"][key] = answer
+        # info or final, no value
+        flow["answers"][step["key"]] = None
 
-    flow["step"] += 1
+    # move to next step
+    set_next_step(flow)
 
-    if flow["step"] >= len(STEPS):
-        # finished -> send to admin
-        await send_to_admin(update, context)
-    else:
-        await ask_next(update, context)
-
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id not in FLOWS:
-        await update.message.reply_text("اضغط /start للبدء.")
+    # if next step is final info, we should prompt (final prompt or photo)
+    # Ask next question or finalize
+    next_idx = get_step_index(flow)
+    if next_idx >= len(STEPS):
+        await finalize_flow_for_user(update, context, uid)
         return
+    next_step = STEPS[next_idx]
+    await update.message.reply_text(next_step["prompt"])
 
-    flow = FLOWS[chat_id]
-    i = flow["step"]
-    if i >= len(STEPS):
-        await update.message.reply_text("انتهت الخطوات، ارسل /start لبدء جديد.")
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    if uid not in FLOWS:
+        FLOWS[uid] = {"answers": {}, "step": 0}
+    flow = FLOWS[uid]
+    idx = get_step_index(flow)
+    if idx >= len(STEPS):
+        await update.message.reply_text("تم إنهاء النموذج. لإعادة التقديم أرسل /start")
         return
-
-    step = STEPS[i]
+    step = STEPS[idx]
     if step["type"] != "photo":
-        await update.message.reply_text("❌ الآن كان مطلوباً نصًّا، ليس صورة.")
+        await update.message.reply_text("ليست مطلوبة صورة الآن. الرجاء متابعة التسلسل.")
         return
 
-    photo = update.message.photo[-1]
-    file_id = photo.file_id
+    # accept the largest photo
+    photo = update.message.photo
+    if not photo:
+        await update.message.reply_text("❌ لم يتم العثور على صورة. الرجاء إرسال صورة (jpg/png) فقط.")
+        return
+    file_id = photo[-1].file_id
+    # store the file_id
     flow["answers"][step["key"]] = file_id
 
-    flow["step"] += 1
-    if flow["step"] >= len(STEPS):
-        await send_to_admin(update, context)
-    else:
-        await ask_next(update, context)
+    # increment step
+    set_next_step(flow)
+
+    # proceed to finalize or next prompt
+    next_idx = get_step_index(flow)
+    if next_idx >= len(STEPS):
+        await finalize_flow_for_user(update, context, uid)
+        return
+    next_step = STEPS[next_idx]
+    await update.message.reply_text(next_step["prompt"])
 
 
-# send to admin with retries and logging
-async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    flow = FLOWS.get(chat_id, {})
-    answers = flow.get("answers", {})
-
-    if not answers:
-        await update.message.reply_text("⚠ حدث خطأ أثناء معالجة إجاباتك. الرجاء إعادة المحاولة بـ /start.")
+async def finalize_flow_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int) -> None:
+    """
+    Send collected answers to admin (ONLY answers, no full question dumps).
+    Do not delete flow from memory.
+    """
+    flow = FLOWS.get(uid)
+    if not flow:
+        await update.message.reply_text("لم يتم العثور على بيانات لتقديمها.")
         return
 
-    admin_text = (
-        "📩 طلب تسجيل جديد\n\n"
-        f"👤 الاسم: {answers.get('full_name', 'غير مذكور')}\n"
-        f"📧 البريد: {answers.get('email', 'غير مذكور')}\n"
-        f"📱 الهاتف: {answers.get('phone', 'غير مذكور')}\n"
-        f"💬 يوزر تلغرام: {answers.get('username', 'غير مذكور')}\n"
-        f"🏦 رقم الحساب: {answers.get('account_number', 'غير مذكور')}\n"
-        f"🧑‍💼 اسم الوكيل: {answers.get('agent_name', 'غير مذكور')}\n"
-    )
-
-    sent = False
-    last_exception: Optional[Exception] = None
-    for attempt in range(1, ADMIN_SEND_RETRIES + 1):
-        try:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_text, parse_mode="Markdown")
-            # send photo if exists
-            photo_id = answers.get("deposit_proof") or answers.get("deposit_proof_file_id") or answers.get("deposit_proof_id")
-            if photo_id:
-                await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=photo_id, caption="🧾 إثبات الإيداع")
-            sent = True
-            logger.info("تم إرسال الطلب للإدمن (attempt %s).", attempt)
-            break
-        except Exception as e:
-            last_exception = e
-            logger.warning("فشل إرسال الطلب للإدمن (attempt %s): %s", attempt, e)
-            # backoff small delay
-            await asyncio.sleep(1 * attempt)
-
-    if not sent:
-        # أخبر المستخدم أن هناك تأخير في الإرسال واطبع السبب في اللوج
-        logger.error("لم يتمكن البوت من إرسال الطلب للإدمن بعد %s محاولات. آخر خطأ: %s", ADMIN_SEND_RETRIES, last_exception)
-        await update.message.reply_text("✅ تم استقبال بياناتك، لكن واجهتنا مشكلة فنية أثناء إرسالها للإدارة — سيتم المحاولة وإبلاغك لاحقاً.")
-    else:
-        # reply to user with final message and WhatsApp button (send in two messages to ensure button shows)
-        final_text = (
-            "🎉 شكراً! تم استلام معلوماتك بنجاح.\n"
-            "⏳ يرجى الانتظار ريثما يتم التحقق من بياناتك، وسنوافيك بالتحديث."
-        )
-        await update.message.reply_text(final_text, parse_mode="Markdown")
-        # send WhatsApp button as separate message (more reliable display)
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📲 تواصل عبر واتساب", url=WHATSAPP_URL)]])
-        await context.bot.send_message(chat_id=chat_id, text="يمكنك التواصل معنا عبر الزر أدناه 👇", reply_markup=keyboard)
-
-    # cleanup
-    FLOWS.pop(chat_id, None)
-
-
-# small ping command for testing admin delivery
-async def pingadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Format admin text
+    admin_text = format_admin_message(flow)
+    # send message to admin (retry safe)
     try:
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text="📣 اختبار: البوت يرسل رسائل إلى الإدمن ✅")
-        await update.message.reply_text("تم إرسال اختبار إلى الإدمن.")
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_text)
     except Exception as e:
-        logger.exception("فشل إرسال اختبار للإدمن: %s", e)
-        await update.message.reply_text(f"فشل إرسال الاختبار: {e}")
+        logger.exception("Failed to send admin message: %s", e)
+        # Don't crash; we continue
+
+    # send photo if provided
+    photo_id = flow.get("answers", {}).get("deposit_proof")
+    if photo_id:
+        try:
+            await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=photo_id, caption="🧾 إثبات الإيداع")
+        except Exception:
+            logger.exception("Failed to send deposit photo to admin")
+
+    # Reply to user: final message + whatsapp button
+    final_text = (
+        "🎉 شكراً! تم استلام معلوماتك بنجاح.\n"
+        "⏳ يرجى الانتظار ريثما يتم التحقق من بياناتك. يمكنك التواصل مباشرة عبر واتساب:"
+    )
+    wa_url = f"https://wa.me/{WHATSAPP_NUMBER.replace('+','')}"
+    keyboard = InlineKeyboardMarkup.from_button(
+        InlineKeyboardButton(text="📲 تواصل عبر واتساب", url=wa_url)
+    )
+    # send final text with button
+    try:
+        await context.bot.send_message(chat_id=uid, text=final_text, reply_markup=keyboard)
+    except Exception:
+        # fallback; user may be in privacy mode
+        try:
+            await context.bot.send_message(chat_id=uid, text=final_text)
+        except Exception:
+            logger.exception("Failed to send final message to user %s", uid)
+
+    # IMPORTANT: per your request, DO NOT delete the flow from memory.
+    # So we keep FLOWS[uid] as-is. If you later want to clear it use separate admin command.
 
 
-# ------------------ App bootstrap ------------------
-def main():
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    # do not delete flow, only mark canceled
+    if uid in FLOWS:
+        FLOWS[uid]["canceled"] = True
+    await update.message.reply_text("تم إلغاء العملية. لإعادة التقديم أرسل /start")
+
+
+def main() -> None:
     app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("pingadmin", pingadmin))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    logger.info("بدء تشغيل البوت — Lebanese X Trading")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cancel", cancel))
+
+    # Text messages
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    # Photo messages
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    # Run polling
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
-
