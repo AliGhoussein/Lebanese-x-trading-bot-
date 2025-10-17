@@ -1,17 +1,14 @@
-# bot.py
+# Lebanese X Trading - Final Bot Script
 import re
 import time
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
 )
 
-# إعدادات عامة
+# ===== إعدادات البوت =====
 TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 ADMIN_CHAT_ID = 1530145001
 WHATSAPP_LINK = "https://wa.me/96171204714"
@@ -19,111 +16,124 @@ WHATSAPP_LINK = "https://wa.me/96171204714"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# حفظ بيانات المستخدمين في الذاكرة
+# ===== تخزين المستخدمين في الذاكرة =====
 users = {}
 
-# خطوات الأسئلة
+# ===== خطوات الأسئلة =====
 steps = [
-    ("full_name", "1️⃣ اكتب اسمك الثلاثي (مثال: محمد علي حيدر) 🌟"),
-    ("email", "2️⃣ اكتب بريدك الإلكتروني ✉ (مثال: example.user@mail.com)"),
-    ("phone", "3️⃣ اكتب رقم هاتفك مع رمز بلدك 📱 (مثال: +96171200000)"),
-    ("telegram", "4️⃣ اكتب المعرّف الخاص بك على تلغرام 👤 (مثال: @AliTrader)"),
-    ("oxshare", "5️⃣ للانضمام للقناة الخاصة افتح حسابك تحت وكالتنا عبر الرابط:\n🔗 https://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490\n\n"
-                "6️⃣ اكتب رقم حسابك الذي أنشأته لدى شركة Oxshare 💳 (مثال: 64090974)"),
-    ("deposit_proof", "7️⃣ أرفق صورة لإثبات الإيداع من الشركة 📎 (صورة مطلوبة، لا نقبل كتابة)"),
-    ("final", "8️⃣ أهلاً وسهلاً بك في عائلة Lebanese X Trading 🤝\nيرجى الانتظار للتدقيق لإضافتك للقناة الخاصة.\n"
-              "يمكنك التواصل معنا مباشرة على واتساب للاستفسار:")
+    ("full_name", "1️⃣ اكتب اسمك الثلاثي ✍\nمثال: محمد علي غصين"),
+    ("email", "2️⃣ اكتب بريدك الإلكتروني ✉\nمثال: example.user@mail.com"),
+    ("phone", "3️⃣ اكتب رقم هاتفك مع رمز بلدك 📱\nمثال: +96171200000"),
+    ("telegram", "4️⃣ اكتب المعرّف الخاص بك على تلغرام 👤\nمثال: @AliTrader"),
+    ("oxshare_ref", "5️⃣ للانضمام للقناة الخاصة افتح حسابك تحت وكالتنا عبر الرابط التالي:\n🔗 https://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490\n\n"
+                    "إذا كان لديك حساب فعلاً لدينا أو عند أحد وكلائنا، اكتب رقم حسابك واسم وكيلك."),
+    ("account_number", "6️⃣ اكتب رقم حسابك الذي أنشأته لدى شركة Oxshare 💳\nمثال: 6409074"),
+    ("deposit_proof", "7️⃣ أرفق صورة البريد الإلكتروني التي تثبت نجاح الإيداع 📎\n(مطلوب إرسال صورة فقط)"),
 ]
 
-# تحقق بسيط للبريد والهاتف
-def is_valid_email(text): return re.match(r"[^@]+@[^@]+\.[^@]+", text)
-def is_valid_phone(text): return bool(re.match(r"^\+?\d{6,}$", text))
+# ===== أدوات التحقق =====
+def valid_email(text): return bool(re.match(r"[^@]+@[^@]+\.[^@]+", text))
+def valid_phone(text): return bool(re.match(r"^\+?\d{6,}$", text))
+def contains_digit(text): return any(ch.isdigit() for ch in text)
 
-# نظام قفل ذكي لتجنب التكرار
-def lock_check(user):
+# ===== قفل ذكي لتفادي التكرار =====
+def is_locked(user):
     now = time.time()
     if user.get("locked") and now - user["locked"] < 2:
         return True
     user["locked"] = now
     return False
 
+# ===== البداية =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     users[user_id] = {"step": 0, "answers": {}, "locked": 0}
+
     await update.message.reply_text(
         "👋 مرحباً! أنا روبوت خدمة العملاء في فريق Lebanese X Trading.\n"
-        "الرجاء الإجابة على كامل الأسئلة بالشكل الصحيح لضمان خدمتكن بشكل أسرع وأفضل 🔥"
+        "الرجاء الإجابة على كامل الأسئلة بالشكل الصحيح لضمان خدمتكن بشكل أسرع وأفضل 🚀"
     )
     await update.message.reply_text(steps[0][1])
 
+# ===== استقبال الرسائل =====
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    msg = update.message
     user = users.get(user_id)
 
     if not user:
-        await update.message.reply_text("يرجى كتابة /start للبدء 🙌")
+        await msg.reply_text("اكتب /start للبدء 🙌")
         return
 
-    if lock_check(user):
-        await update.message.reply_text("⏳ يرجى الانتظار قليلاً...")
+    if is_locked(user):
+        await msg.reply_text("⏳ يرجى الانتظار قليلاً...")
         return
 
     step_key, step_text = steps[user["step"]]
-    text = (update.message.text or "").strip()
+    text = (msg.text or "").strip()
 
-    # تحقق من نوع الجواب حسب الخطوة
+    # تحقق حسب الخطوة الحالية
     if step_key == "full_name":
-        if any(ch.isdigit() for ch in text):
-            return await update.message.reply_text("❌ الاسم لا يجب أن يحتوي أرقام. أعد المحاولة.")
+        if not text or contains_digit(text):
+            return await msg.reply_text("❌ الاسم غير صالح. أعد المحاولة واكتب اسمك الثلاثي من دون أرقام.")
     elif step_key == "email":
-        if not is_valid_email(text):
-            return await update.message.reply_text("❌ البريد الإلكتروني غير صحيح. أعد المحاولة.")
+        if not valid_email(text):
+            return await msg.reply_text("❌ البريد الإلكتروني غير صحيح. مثال: example@mail.com")
     elif step_key == "phone":
-        if not is_valid_phone(text):
-            return await update.message.reply_text("❌ رقم الهاتف غير صالح. مثال: +96171200000")
+        if not valid_phone(text):
+            return await msg.reply_text("❌ رقم الهاتف غير صالح. مثال: +96171200000")
+    elif step_key == "telegram":
+        if not text.startswith("@"):
+            return await msg.reply_text("❌ اسم المستخدم يجب أن يبدأ بـ @")
     elif step_key == "deposit_proof":
-        if not update.message.photo:
-            return await update.message.reply_text("❌ مطلوب صورة فقط. أعد الإرسال بصورة.")
-        photo_id = update.message.photo[-1].file_id
+        if not msg.photo:
+            return await msg.reply_text("❌ مطلوب صورة فقط. أعد الإرسال بصورة.")
+        photo_id = msg.photo[-1].file_id
         user["answers"][step_key] = photo_id
         user["step"] += 1
-        return await next_step(update, context, user)
+        return await next_question(update, context, user)
 
     # حفظ الإجابة النصية
-    if step_key != "deposit_proof":
-        user["answers"][step_key] = text
-
+    user["answers"][step_key] = text
     user["step"] += 1
-    await next_step(update, context, user)
+    await next_question(update, context, user)
 
-async def next_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
+# ===== السؤال التالي =====
+async def next_question(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
     if user["step"] >= len(steps):
-        return await finish_form(update, context, user)
+        await finish_form(update, context, user)
+        return
+    _, question = steps[user["step"]]
+    await update.message.reply_text(question)
 
-    step_key, step_text = steps[user["step"]]
-    await update.message.reply_text(step_text)
-
+# ===== عند الانتهاء =====
 async def finish_form(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
     answers = user["answers"]
-    lines = []
-    for k, v in answers.items():
-        if k == "deposit_proof":
-            v = "(مرفقة صورة)"
-        lines.append(f"{k}: {v}")
-    result = "\n".join(lines)
+    txt = "\n".join(
+        f"{k}: {'(مرفقة صورة)' if k == 'deposit_proof' else v}"
+        for k, v in answers.items()
+    )
 
-    await context.bot.send_message(ADMIN_CHAT_ID, f"📩 طلب جديد من {update.effective_user.full_name}:\n\n{result}")
+    # إرسال للأدمن
+    await context.bot.send_message(
+        ADMIN_CHAT_ID,
+        f"📩 طلب جديد من {update.effective_user.full_name}:\n\n{txt}"
+    )
 
     if "deposit_proof" in answers:
-        await context.bot.send_photo(ADMIN_CHAT_ID, photo=answers["deposit_proof"], caption="📎 إثبات الإيداع")
+        await context.bot.send_photo(ADMIN_CHAT_ID, answers["deposit_proof"], caption="📎 إثبات الإيداع")
 
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📞 تواصل عبر واتساب", url=WHATSAPP_LINK)]])
+    # إرسال رسالة الختام + زر واتساب
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📞 تواصل عبر واتساب", url=WHATSAPP_LINK)]]
+    )
     await update.message.reply_text(
         "✅ شكراً لك! تم استلام بياناتك بنجاح.\n"
         "سيتم التواصل معك قريباً بعد مراجعة المعلومات 🔍",
         reply_markup=keyboard
     )
 
+# ===== تشغيل البوت =====
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
