@@ -1,6 +1,7 @@
 # bot.py
 import re
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -10,200 +11,183 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ---------------- CONFIG (ضع التوكن والآدمن كما تفضّل) ----------------
+# ---------------- CONFIGURATION ----------------
 ADMIN_CHAT_ID = 1530145001
 TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 WHATSAPP_NUMBER = "+96171204714"
-# --------------------------------------------------------------------
+# ------------------------------------------------
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# In-memory flows: { user_id: {"step": int, "answers": {}} }
-FLOWS = {}
+FLOWS = {}  # {user_id: {"step": int, "answers": {}, "locked": False}}
 
-# ---- خطوات الأسئلة (معدّلة: أمثلة وهمية، السؤال 5+6 مدموجان) ----
+# -------- تسلسل الأسئلة الصحيح --------
 STEPS = [
-    {"key": "name", "type": "text", "prompt": "1️⃣ اكتب اسمك الثلاثي\nمثال (وهمي): محمد حمزة خلف 🎯"},
-    {"key": "email", "type": "email", "prompt": "2️⃣ اكتب بريدك الإلكتروني\nمثال (وهمي): example.user@mail.com ✉"},
-    {"key": "phone", "type": "phone", "prompt": "3️⃣ اكتب رقم هاتفك مع رمز بلدك\nمثال (وهمي): +96171200000 📱"},
-    {"key": "username", "type": "username", "prompt": "4️⃣ اكتب المعرّف الخاص بك على تلغرام (username)\nمثال (وهمي): @example_user 🔗"},
+    {"key": "name", "type": "text", "prompt": "1️⃣ اكتب اسمك الثلاثي 🎯\n🧩 مثال: محمد حمزة خلف"},
+    {"key": "email", "type": "email", "prompt": "2️⃣ اكتب بريدك الإلكتروني ✉\n🧩 مثال: example.user@mail.com"},
+    {"key": "phone", "type": "phone", "prompt": "3️⃣ اكتب رقم هاتفك مع رمز بلدك 📱\n🧩 مثال: +96171200000"},
+    {"key": "username", "type": "username", "prompt": "4️⃣ اكتب المعرّف الخاص بك على تلغرام (username) 🔗\n🧩 مثال: @example_user"},
     {
         "key": "oxshare_info",
         "type": "text",
         "prompt": (
-            "5️⃣ فتح حساب / معلومات الوكيل 🔔\n\n"
-            "للانضمام افتح حسابك تحت وكالتنا عبر الرابط:\n"
+            "5️⃣ افتح حسابك عبر الرابط تحت وكالتنا أو اكتب معلومات وكيلك إن كنت تملك حسابًا مسبقًا 💼\n\n"
             "🔗 https://my.oxshare.com/register?referral=01973820-6aaa-7313-bda5-2ffe0ade1490\n\n"
-            "إذا عندك حساب مسبقاً: اكتب رقم الحساب واسم الوكيل.\n"
-            "مثال (وهمي): 6409074 - الوكيل: علي غصين ✅\n\n"
-            "ملاحظة: إن لم تفتح حساب الآن، فقط اكتب: ليس لدي حساب أو اترك info قصيرة."
+            "🧩 مثال: 6409074 - الوكيل: علي غصين"
         ),
     },
-    {"key": "deposit_proof", "type": "photo", "prompt": "6️⃣ أرفق صورة لرسالة البريد الإلكتروني التي تُثبت نجاح الإيداع 🖼\n(مطلوبة صورة — إذا أرسلت نصًا سنطلب إعادة الصورة)"},
+    {"key": "deposit_proof", "type": "photo", "prompt": "6️⃣ أرفق صورة لرسالة البريد الإلكتروني التي تُثبت نجاح الإيداع 🖼"},
 ]
-# -------------------------------------------------------------------
+# ---------------------------------------
 
-# لسهولة التحقق: نمط بسيط (متساهل)
 EMAIL_RE = re.compile(r"[^@]+@[^@]+\.[^@]+")
-PHONE_RE = re.compile(r"^\+?\d{6,15}$")  # قبول + و 6-15 رقم
+PHONE_RE = re.compile(r"^\+?\d{6,15}$")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    FLOWS[uid] = {"step": 0, "answers": {}}
-
-    welcome_text = (
-        "👋 مرحباً! أنا روبوت خدمة العملاء - فريق Lebanese X Trading.\n\n"
-        "➡ الرجاء الإجابة على كامل الأسئلة بالشكل الصحيح لضمان خدمتكم بشكل أسرع وأفضل.\n"
-        "لن يأخذ الأمر أكثر من دقيقة واحدة 🕒\n"
-    )
-    await update.message.reply_text(welcome_text)
-    # أرسل أول سؤال
-    await update.message.reply_markdown(STEPS[0]["prompt"])
-
-def lenient_validate(step_type, text):
+def validate_answer(step_type, text):
     text = text.strip()
     if step_type == "text":
-        # متساهل: اسم مقبول إن كان يحتوي على حروف أو مسافات (أقل من 2 حرف => رفض)
-        if len(text) < 2:
-            return False
-        # قبول أرقام إن كانت مصحوبة بنص
-        return True
-    if step_type == "email":
-        # متساهل: إذا فيه شكل بسيط @ و . نقبله، وإلا نقبل كـ 'unverified' بدل كره
-        return bool(EMAIL_RE.search(text)) or len(text) >= 5
-    if step_type == "phone":
-        # متساهل: نقبل إذا فيه + أو أرقام بطول منطقي
-        return bool(PHONE_RE.match(text)) or (len(re.sub(r"\D", "", text)) >= 6)
-    if step_type == "username":
-        # متساهل: قبول لو يبدأ بـ@ أو مجرد كلمة
-        return text.startswith("@") or (len(text) >= 3)
+        return len(text) >= 2
+    elif step_type == "email":
+        return bool(EMAIL_RE.search(text))
+    elif step_type == "phone":
+        return bool(PHONE_RE.match(text)) or len(re.sub(r"\D", "", text)) >= 6
+    elif step_type == "username":
+        return text.startswith("@") or len(text) >= 3
     return True
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    FLOWS[user.id] = {"step": 0, "answers": {}, "locked": False}
+
+    welcome_msg = (
+        "👋 مرحباً!\n\n"
+        "أنا روبوت خدمة العملاء لفريق Lebanese X Trading.\n"
+        "💬 الرجاء الإجابة على الأسئلة خطوة بخطوة لضمان خدمتكم بشكل أسرع وأفضل.\n\n"
+        "لنبدأ الآن 🚀"
+    )
+    await update.message.reply_markdown(welcome_msg)
+    await asyncio.sleep(1)
+    await update.message.reply_markdown(STEPS[0]["prompt"])
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in FLOWS:
-        FLOWS[uid] = {"step": 0, "answers": {}}
-
-    flow = FLOWS[uid]
-    step_idx = flow["step"]
-    step = STEPS[step_idx]
-
-    # إذا الانتظار في خطوة صورة وليس نص
-    if step["type"] == "photo":
-        await update.message.reply_text("❌ في هذه الخطوة نحتاج صورة (إثبات الإيداع). الرجاء إرسال صورة الآن.")
-        return
-
+    user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # تحقق متساهل
-    ok = lenient_validate(step["type"], text)
-    if not ok:
-        await update.message.reply_text("❌ الإجابة غير مقبولة، حاول بطريقة أوضح من فضلك.")
+    # تحقق أن المستخدم عنده جلسة
+    if user_id not in FLOWS:
+        FLOWS[user_id] = {"step": 0, "answers": {}, "locked": False}
+
+    flow = FLOWS[user_id]
+
+    # منع التداخل
+    if flow.get("locked"):
+        await update.message.reply_text("⏳ يرجى الانتظار قليلاً...")
         return
 
+    flow["locked"] = True
+
+    step_index = flow["step"]
+    step = STEPS[step_index]
+
+    # لو المستخدم أرسل نص بدل صورة المطلوبة
+    if step["type"] == "photo":
+        await update.message.reply_text("❌ في هذه الخطوة مطلوب صورة، رجاءً أرسل صورة.")
+        flow["locked"] = False
+        return
+
+    # تحقق من الإجابة
+    if not validate_answer(step["type"], text):
+        await update.message.reply_text("⚠ الإجابة غير صحيحة، حاول مجدداً بالشكل المطلوب.")
+        flow["locked"] = False
+        return
+
+    # حفظ الإجابة
     flow["answers"][step["key"]] = text
     flow["step"] += 1
 
-    # إذا اكتمل
+    # الانتقال للخطوة التالية أو إنهاء
     if flow["step"] >= len(STEPS):
         await finalize(update, context)
-        return
+    else:
+        next_step = STEPS[flow["step"]]
+        await asyncio.sleep(0.7)
+        await update.message.reply_markdown(f"✅ ممتاز! الآن:\n\n{next_step['prompt']}")
 
-    # أرسل السؤال التالي مع إيموجي تحفيزي
-    next_prompt = STEPS[flow["step"]]["prompt"]
-    await update.message.reply_markdown("✅ ممتاز! الآن:\n\n" + next_prompt)
+    flow["locked"] = False
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in FLOWS:
-        FLOWS[uid] = {"step": 0, "answers": {}}
-
-    flow = FLOWS[uid]
-    step_idx = flow["step"]
-    step = STEPS[step_idx]
-
-    if step["type"] != "photo":
-        await update.message.reply_text("❌ لم نطلب صورة في هذه الخطوة، رجاءً أرسل نصاً.")
-        return
-
-    # استلم آخر صورة (أفضل جودة)
+    user_id = update.effective_user.id
     photo = update.message.photo[-1]
     file_id = photo.file_id
+
+    if user_id not in FLOWS:
+        FLOWS[user_id] = {"step": 0, "answers": {}, "locked": False}
+
+    flow = FLOWS[user_id]
+
+    if flow["locked"]:
+        await update.message.reply_text("⏳ يرجى الانتظار قليلاً...")
+        return
+
+    step = STEPS[flow["step"]]
+
+    if step["type"] != "photo":
+        await update.message.reply_text("❌ لم نطلب صورة في هذه المرحلة.")
+        return
+
     flow["answers"][step["key"]] = file_id
     flow["step"] += 1
 
     if flow["step"] >= len(STEPS):
         await finalize(update, context)
-        return
-
-    next_prompt = STEPS[flow["step"]]["prompt"]
-    await update.message.reply_markdown("✅ تم استلام الصورة!\n\n" + next_prompt)
+    else:
+        next_step = STEPS[flow["step"]]
+        await asyncio.sleep(0.7)
+        await update.message.reply_markdown(f"✅ تم استلام الصورة!\n\n{next_step['prompt']}")
 
 async def finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    flow = FLOWS.get(uid, {"answers": {}, "step": 0})
+    user_id = update.effective_user.id
+    flow = FLOWS[user_id]
     answers = flow["answers"]
 
-    # رساله للإدمن — فقط الإجابات (بدون نص الأسئلة)
-    admin_msg_lines = [
-        "📥 جديد: إجابات مستخدم",
-        f"🆔 user_id: {uid}",
-    ]
-    # المخرجات تظهر فقط الإجابات المتوفرة
-    fields = [
-        ("الاسم", "name"),
-        ("البريد الإلكتروني", "email"),
-        ("الهاتف", "phone"),
-        ("اليوزرنيم", "username"),
-        ("معلومات Oxshare/الوكيل", "oxshare_info"),
-    ]
-    for label, key in fields:
-        val = answers.get(key, "— لم يُقدّم —")
-        admin_msg_lines.append(f"{label}: {val}")
+    # إرسال النتائج للإدمن
+    summary = (
+        f"👤 الاسم: {answers.get('name')}\n"
+        f"📧 البريد: {answers.get('email')}\n"
+        f"📱 الهاتف: {answers.get('phone')}\n"
+        f"💬 المعرّف: {answers.get('username')}\n"
+        f"🧾 معلومات الحساب/الوكيل: {answers.get('oxshare_info')}"
+    )
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=summary)
 
-    # رقم الحساب إن وُجد في نفس الحقل أو منفصل
-    # صورة الإثبات يتم إرسالها منفصلة
-    admin_text = "\n".join(admin_msg_lines)
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_text)
-
-    # إذا فيه صورة إثبات، نرسلها كـ photo للادمن
     if "deposit_proof" in answers:
-        try:
-            await context.bot.send_photo(
-                chat_id=ADMIN_CHAT_ID, photo=answers["deposit_proof"], caption="🧾 إثبات الإيداع"
-            )
-        except Exception as e:
-            logger.exception("Failed to send proof photo to admin: %s", e)
+        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=answers["deposit_proof"], caption="📎 إثبات الإيداع")
 
-    # رسالة للمستخدم: تأكيد مع زر واتساب
+    # زر واتساب
     wa_url = f"https://wa.me/{WHATSAPP_NUMBER.replace('+', '')}"
     keyboard = InlineKeyboardMarkup.from_button(
-        InlineKeyboardButton(text="📲 تواصل عبر واتساب الآن", url=wa_url)
+        InlineKeyboardButton("📲 تواصل معنا عبر واتساب", url=wa_url)
     )
 
+    # رسالة ختامية
     confirmation = (
-        "🎉 شكرًا! تم استلام معلوماتك بنجاح ✅\n\n"
-        "⏳ سيتم التحقق من بياناتك لإضافتك إلى القناة الخاصة.\n"
-        "إذا رغبت بالتواصل الفوري، اضغط زر واتساب أدناه للتواصل معنا الآن."
+        "🎉 شكرًا لك! تم استلام جميع معلوماتك بنجاح ✅\n\n"
+        "⏳ يرجى الانتظار قليلاً لحين مراجعة بياناتك.\n\n"
+        "📞 اضغط الزر أدناه للتواصل معنا مباشرة عبر واتساب إذا رغبت بالمساعدة الفورية 👇"
     )
     await update.message.reply_markdown(confirmation, reply_markup=keyboard)
 
-    # لا نحذف البيانات من الذاكرة (يمكن تعديل لاحقاً لحفظ دائم)
-    # نحتفظ بتسجيل بسيط في اللوج
-    logger.info("Collected answers for user %s: %s", uid, answers)
+    logger.info(f"✅ User {user_id} completed flow successfully.")
 
-def run():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-
-    # شغل polling (واحد فقط)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.run_polling()
 
 if __name__ == "__main__":
-    run()
+    main()
