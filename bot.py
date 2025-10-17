@@ -27,7 +27,7 @@ ADMIN_SEND_RETRIES = 3
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 # Steps (one-by-one)
 STEPS = [
@@ -358,3 +358,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
