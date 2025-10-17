@@ -14,7 +14,7 @@ from telegram.ext import (
 
 # ========== CONFIG ==========
 TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
-ADMIN_CHAT_ID = 1530145001
+ADMIN_CHAT_ID = 
 WHATSAPP_URL = "https://wa.me/96171204714"
 # ============================
 
@@ -251,3 +251,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
