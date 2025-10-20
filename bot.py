@@ -1,4 +1,4 @@
-# Lebanese X Trading - Final Bot Script (Merged Q5+6 + Fake Examples)
+# Lebanese X Trading - Final Bot Script (Updated: WhatsApp group link + join text)
 import re
 import time
 import logging
@@ -11,7 +11,9 @@ from telegram.ext import (
 # ===== إعدادات البوت =====
 TOKEN = "8452093321:AAEI16NcAIFTHRt1ieKYKe1CQ1qhUfcMgjs"
 ADMIN_CHAT_ID = 1530145001
-WHATSAPP_LINK = "https://wa.me/96171204714"
+
+# 🔗 رابط مجموعة واتساب الجديد
+WHATSAPP_GROUP_LINK = "https://chat.whatsapp.com/IrGq4wC3Z7w5juCMI1YtSz?mode=wwt"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -124,14 +126,16 @@ async def finish_form(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
     if "deposit_proof" in answers:
         await context.bot.send_photo(ADMIN_CHAT_ID, answers["deposit_proof"], caption="📎 إثبات الإيداع")
 
-    # إرسال رسالة الختام + زر واتساب
+    # إرسال رسالة الختام + زر مجموعة الواتساب
+    join_text = "اضغط على الرابط للانضمام إلى مجموعة التوصيات 👇"
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("📞 تواصل عبر واتساب", url=WHATSAPP_LINK)]]
+        [[InlineKeyboardButton("📢 انضم إلى مجموعة التوصيات", url=WHATSAPP_GROUP_LINK)]]
     )
+    await update.message.reply_text(join_text, reply_markup=keyboard)
+
     await update.message.reply_text(
         "✅ شكراً لك! تم استلام بياناتك بنجاح.\n"
-        "سيتم التواصل معك قريباً بعد مراجعة المعلومات 🔍",
-        reply_markup=keyboard
+        "سيتم التواصل معك قريباً بعد مراجعة المعلومات 🔍"
     )
 
 # ===== تشغيل البوت =====
